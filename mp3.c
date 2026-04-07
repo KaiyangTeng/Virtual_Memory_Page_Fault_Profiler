@@ -28,7 +28,34 @@ struct listnode
 	struct list_head node;
 };
 
-
+static void workhandler(struct work_struct *worker)
+{
+   unsigned long timesum=jiffies,minfault=0,majfault=0,cpu=0;
+   struct listnode *curr;
+   bool empty=true;
+   mutex_lock(&mp3mutex);
+   list_for_each_entry(curr,&mp3head,node)
+   {
+      unsigned long minf,majf,ut,st;
+      if(get_cpu_use(curr->pid,&minf,&majf,&ut,&st)==0)
+      {
+         empty=false;
+         minfault+=minf;
+         majfault+=majf;
+         cpu+=ut+st;
+      }
+   }
+   mutex_unlock(&mp3mutex);
+   if(!empty) 
+   {
+      gbuffer[indx++]=timesum;
+      gbuffer[indx++]=minfault;
+      gbuffer[indx++]=majfault;
+      gbuffer[indx++]=cpu;
+      if(indx>=48000) indx=0;
+      mod_delayed_work(wq,&worker,msecs_to_jiffies(50));
+   }
+}
 
 bool taskregister(pid_t pid)
 {
