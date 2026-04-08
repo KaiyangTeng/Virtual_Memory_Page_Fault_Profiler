@@ -19,8 +19,12 @@ static struct proc_dir_entry *mp3dir;
 static struct proc_dir_entry *mp3status;
 static struct list_head mp3head;
 static struct mutex mp3mutex;
-static char *gbuffer;
-
+static struct workqueue_struct *wq;
+static struct delayed_work worker;
+static unsigned long *gbuffer;
+static dev_t mp3dev;
+static struct cdev mp3cdev;
+int indx=0;
 
 struct listnode
 {
