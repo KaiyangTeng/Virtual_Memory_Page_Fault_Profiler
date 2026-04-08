@@ -247,7 +247,32 @@ void freebuffer(void)
    return;
 }
 
+static int chardvcini(void)
+{
+   int regnum;
+   mp3dev=MKDEV(MP3_MAJOR,MP3_MINOR);
+   regnum=register_chrdev_region(mp3dev,MP3_DEV_COUNT,MP3_DEV_NAME);
+   if(regnum<0)
+   {
+      pr_info("egister_chrdev_region failed\n");
+      return regnum;
+   }
+   cdev_init(&mp3cdev, &myfops);
+   regnum=cdev_add(&mp3cdev,mp3_dev,MP3_DEV_COUNT);
+   if(regnum<0) 
+   {
+      pr_info("cdev_add failed\n");
+      unregister_chrdev_region(mp3dev,MP3_DEV_COUNT);
+      return regnum;
+   }
+   return 0;
+}
 
+static void chardvcexit(void)
+{
+   cdev_del(&mp3_cdev);
+   unregister_chrdev_region(mp3_dev,MP3_DEV_COUNT);
+}
 
 
 static const struct proc_ops my_ops=
