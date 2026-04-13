@@ -251,6 +251,45 @@ void freebuffer(void)
    return;
 }
 
+
+static int myopen(struct inode *inode, struct file *file)
+{
+   return 0;
+}
+
+static int myclose(struct inode *inode, struct file *file)
+{
+   return 0;
+}
+
+static int mymmap(struct file *file, struct vm_area_struct *vma)
+{
+   unsigned long i=0;
+   unsigned long usrbsize=vma->vm_end-vma->vm_start;
+   if(usrbsize>buff_size) return -1;
+   for(i=0;i<usrbsize;i+=PAGE_SIZE)
+   {
+      unsigned long pfn=vmalloc_to_pfn((char*)gbuffer+i);
+      unsigned long usraddr=vma->vm_start+i;
+      if(remap_pfn_range(vma,usraddr,pfn,PAGE_SIZE,vma->vm_page_prot)!=0)
+      {
+         pr_info("remap_pfn_range failed\n");
+         return -1;
+      }
+   }
+   return 0;
+}
+
+static const struct file_operations myfops=
+{
+   .owner=THIS_MODULE,
+   .open=myopen,
+   .release=myclose,
+   .mmap=mymmap,
+};
+
+
+
 static int chardvcini(void)
 {
    int regnum;
