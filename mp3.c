@@ -7,6 +7,7 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/mm.h>
+#include <linux/cdev.h>
 #include "mp3_given.h"
 
 MODULE_LICENSE("GPL");
@@ -53,16 +54,20 @@ static void workhandler(struct work_struct *worker)
    if(!empty) 
    {
       gbuffer[indx++]=timesum;
+      indx%=48000;
       gbuffer[indx++]=minfault;
+      indx%=48000;
       gbuffer[indx++]=majfault;
+      indx%=48000;
       gbuffer[indx++]=cpu;
-      if(indx>=48000) indx=0;
+      indx%=48000;
       mod_delayed_work(wq,&worker,msecs_to_jiffies(50));
    }
 }
 
-bool taskregister(pid_t pid)
+static bool taskregister(pid_t pid)
 {
+   bool empty;
    struct listnode *temp;
    struct listnode *curr=kmalloc(sizeof(*curr),GFP_KERNEL);
    if(!curr) 
@@ -72,8 +77,10 @@ bool taskregister(pid_t pid)
    }
    curr->pid=pid;
    mutex_lock(&mp3mutex);
+   empty=list_empty(&mp3head);
    list_for_each_entry(temp,&mp3head,node)
    {
+      // Ignore duplicate registration 
       if(temp->pid==pid)
       {
          mutex_unlock(&mp3mutex);
@@ -84,13 +91,16 @@ bool taskregister(pid_t pid)
    }
    list_add_tail(&curr->node,&mp3head);
    mutex_unlock(&mp3mutex);
+   //Start sampling when the first task is inserted
+   if(empty) queue_delayed_work(wq,&worker,0);
    return 1;
 }
 
 
-bool deregister(pid_t pid)
+static bool deregister(pid_t pid)
 {
    struct listnode *curr,*temp;
+   bool empty;
    mutex_lock(&mp3mutex);
    list_for_each_entry_safe(curr,temp,&mp3head,node)
    {
@@ -98,7 +108,10 @@ bool deregister(pid_t pid)
       {
          list_del(&curr->node);
          kfree(curr);
+         empty=list_empty(&mp3head);
          mutex_unlock(&mp3mutex);
+         //Stop sampling when there is no registered task left
+         if(empty) cancel_delayed_work_sync(&worker);
          return 1;
       }
    }
