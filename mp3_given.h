@@ -4,7 +4,7 @@
 #include <linux/pid.h>
 #include <linux/sched.h>
 
-struct task_struct* find_task_by_pid(unsigned int nr)
+static struct task_struct* find_task_by_pid(unsigned int nr)
 {
     struct task_struct* task = NULL;
     rcu_read_lock();
@@ -19,7 +19,7 @@ struct task_struct* find_task_by_pid(unsigned int nr)
 // PROCESS CPU TIME IN JIFFIES AND HARD AND SOFT PAGE FAULT COUNTS
 // SINCE THE LAST INVOCATION OF THE FUNCTION FOR THE SPECIFIED PID.
 // OTHERWISE IT RETURNS -1
-int get_cpu_use(int pid, unsigned long *min_flt, unsigned long *maj_flt,
+static int get_cpu_use(int pid, unsigned long *min_flt, unsigned long *maj_flt,
          unsigned long *utime, unsigned long *stime)
 {
         int ret = -1;
