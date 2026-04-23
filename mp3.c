@@ -34,15 +34,26 @@ struct listnode
 };
 
 
-
+/*
+ * Periodic profiler callback.
+ *
+ * Every time the delayed work runs, it samples all registered tasks and
+ * accumulates four values for this sampling interval:
+ *   1 current jiffies
+ *   2 total soft faults
+ *   3 total hard faults
+ *   4 total CPU time (utime + stime)
+ * Dead or invalid PIDs are removed from the registration list so that the
+ * profiler does not keep polling stale tasks forever.
+ */
 static void workhandler(struct work_struct *input)
 {
    unsigned long timesum=jiffies,minfault=0,majfault=0,cpu=0;
-   struct listnode *curr;
+   struct listnode *curr,*temp;
    bool empty=true;
    // Sum the current sample over all registered tasks
    mutex_lock(&mp3mutex);
-   list_for_each_entry(curr,&mp3head,node)
+   list_for_each_entry_safe(curr,temp,&mp3head,node)
    {
       unsigned long minf,majf,ut,st;
       if(get_cpu_use(curr->pid,&minf,&majf,&ut,&st)==0)
@@ -52,9 +63,17 @@ static void workhandler(struct work_struct *input)
          majfault+=majf;
          cpu+=ut+st;
       }
+      else
+      {
+         list_del(&curr->node);
+         kfree(curr);
+      }
    }
    mutex_unlock(&mp3mutex);
-   // Write one sample (time, soft fault, hard fault, cpu) into the ring buffer
+   /*
+    * Write one sample into the profiler buffer.
+    * The monitor expects samples in groups of four unsigned long values.
+    */
    if(!empty) 
    {
       gbuffer[indx++]=timesum;
@@ -70,12 +89,19 @@ static void workhandler(struct work_struct *input)
    }
 }
 
-
+/*
+ * Register one PID into the profiler list.
+ *
+ * If this PID is the first registered task, start a fresh profiling session
+ * by resetting the shared buffer and starting the delayed work queue.
+ */
 static bool taskregister(pid_t pid)
 {
    bool empty;
    struct listnode *temp;
-   struct listnode *curr=kmalloc(sizeof(*curr),GFP_KERNEL);
+   struct listnode *curr;
+   if(pid<=0) return 0;
+   curr=kmalloc(sizeof(*curr),GFP_KERNEL);
    if(!curr) 
    {
       pr_info("reg kmalloc failed\n");
@@ -102,7 +128,11 @@ static bool taskregister(pid_t pid)
    return 1;
 }
 
-
+/*
+ * Remove one PID from the profiler list.
+ * If the list becomes empty after deletion, stop the delayed work because
+ * there is no remaining task to profile.
+ */
 static bool deregister(pid_t pid)
 {
    struct listnode *curr,*temp;
@@ -125,7 +155,7 @@ static bool deregister(pid_t pid)
    return 0;
 }
 
-
+/* Free every node left in the registration list during module cleanup. */
 static void cleanlist(void)
 {
    struct listnode *curr,*temp;
@@ -138,7 +168,10 @@ static void cleanlist(void)
    mutex_unlock(&mp3mutex);
 }
 
-
+/*
+ * Read callback for /proc/mp3/status.
+ * Exports the current registered PID list to user space, one PID per line.
+ */
 static ssize_t my_read(struct file * inputfile, char __user * usrbuf, size_t len, loff_t * p)
 {
    char *kbuf;
@@ -176,7 +209,13 @@ static ssize_t my_read(struct file * inputfile, char __user * usrbuf, size_t len
    return len;
 }
 
-
+/*
+ * Write callback for /proc/mp3/status.
+ *
+ * Supported commands:
+ *   R <pid> : register one PID
+ *   U <pid> : unregister one PID
+ */
 static ssize_t my_write(struct file * inputfile, const char __user *usrbuf, size_t len, loff_t * p)
 {
    char kbuf[25];
@@ -197,11 +236,7 @@ static ssize_t my_write(struct file * inputfile, const char __user *usrbuf, size
       int pid;
       if(sscanf(kbuf,"R %d",&pid)==1)
       {
-         if(!taskregister(pid)) 
-         {
-            pr_info("taskregister failed\n");
-            return -1;
-         }
+         taskregister(pid);
       }
       else 
       {
@@ -215,15 +250,11 @@ static ssize_t my_write(struct file * inputfile, const char __user *usrbuf, size
       int pid;
       if(sscanf(kbuf,"U %d",&pid)==1)
       {
-         if(!deregister(pid))
-         {
-            pr_info("deregister failed\n");
-            return -1;
-         }
+         deregister(pid);
       }
       else 
       {
-         pr_info("Bad input R\n");
+         pr_info("Bad input U\n");
          return -1;
       }
    }
@@ -236,6 +267,7 @@ static ssize_t my_write(struct file * inputfile, const char __user *usrbuf, size
    return len;
 }
 
+/* Allocate the shared profiler buffer and initialize all entries to -1. */
 static bool allocatebuffer(void)
 {
    gbuffer=vmalloc(buff_size);
@@ -249,6 +281,8 @@ static bool allocatebuffer(void)
    return 1;
 }
 
+
+/* Free the shared profiler buffer during module unload. */
 static void freebuffer(void)
 {
    if(!gbuffer) return;
@@ -256,16 +290,25 @@ static void freebuffer(void)
    return;
 }
 
+
+/* Character-device open: intentionally empty for this MP. */
 static int myopen(struct inode *inode, struct file *file)
 {
    return 0;
 }
 
+/* Character-device close: intentionally empty for this MP. */
 static int myclose(struct inode *inode, struct file *file)
 {
    return 0;
 }
 
+
+/*
+ * mmap callback for the char device.
+ * Maps each page of the vmalloc'ed profiler buffer into the user VMA so the
+ * monitor process can read samples directly from shared memory.
+ */
 static int mymmap(struct file *file, struct vm_area_struct *vma)
 {
    unsigned long i=0;
@@ -293,6 +336,8 @@ static const struct file_operations myfops=
    .mmap=mymmap,
 };
 
+
+/* Register the MP3 character device with major 423 and minor 0. */
 static int chardvcini(void)
 {
    int regnum;
@@ -314,6 +359,8 @@ static int chardvcini(void)
    return 0;
 }
 
+
+/* Unregister the MP3 character device during module cleanup. */
 static void chardvcexit(void)
 {
    cdev_del(&mp3cdev);
@@ -327,7 +374,12 @@ static const struct proc_ops my_ops=
    .proc_write=my_write,
 };
 
-// mp1_init - Called when module is loaded
+/*
+ * Module initialization.
+ * Creates the proc entry, initializes the registration list and lock,
+ * allocates the profiler buffer, creates the char device, and prepares the
+ * delayed work item used for periodic sampling.
+ */
 static int __init mp3_init(void)
 {
    #ifdef DEBUG
@@ -360,7 +412,12 @@ static int __init mp3_init(void)
    return 0;   
 }
 
-// mp1_exit - Called when module is unloaded
+
+/*
+ * Module cleanup.
+ * Stops profiling, destroys the workqueue, frees shared memory, unregisters
+ * the char device, clears the registration list, and removes proc entries.
+ */
 static void __exit mp3_exit(void)
 {
    #ifdef DEBUG
