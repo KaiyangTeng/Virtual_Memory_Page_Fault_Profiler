@@ -1,6 +1,5 @@
 # Virtual Memory Page Fault Profiler
 
----
 
 ## 1. Project Overview
 
@@ -19,7 +18,6 @@ The profiler supports:
 
 At a high level, the project demonstrates how the OS kernel can expose low-overhead profiling data to user space without repeatedly copying data between kernel memory and user memory.
 
----
 
 ## 2. System Architecture
 
@@ -64,7 +62,6 @@ Monitor Process
 profile*.data -> plots -> analysis
 ````
 
----
 
 ## 3. Kernel Module Implementation
 
@@ -92,7 +89,6 @@ The read callback returns the list of currently registered PIDs, with one PID pe
 
 Internally, the module parses the first character of the command to determine whether the operation is registration or unregistration. This provides a simple unified control interface for user-space workloads.
 
----
 
 ### 3.2 Registered Process List
 
@@ -116,7 +112,6 @@ The module starts profiling when the first process is registered. When the last 
 
 Duplicate registration is ignored to avoid adding the same PID multiple times.
 
----
 
 ### 3.3 Profiler Buffer
 
@@ -151,7 +146,6 @@ where:
 
 The buffer stores up to 12,000 samples, and since each sample contains four values, the monitor reads up to 48,000 `long` entries.
 
----
 
 ### 3.4 Delayed Workqueue Sampling
 
@@ -189,7 +183,6 @@ If a PID is no longer valid, the corresponding node is removed from the register
 
 This design keeps the profiler lightweight and avoids unnecessary work after monitored processes terminate.
 
----
 
 ### 3.5 Character Device Interface
 
@@ -224,7 +217,6 @@ The character device implements three file operations:
 
 The `open` and `release` callbacks are intentionally simple because the main purpose of the character device is to support memory mapping.
 
----
 
 ### 3.6 mmap Implementation
 
@@ -243,7 +235,6 @@ This creates a shared memory region between the kernel module and the monitor pr
 
 This is the key performance optimization in this MP.
 
----
 
 ## 4. Build and Run Instructions
 
@@ -261,7 +252,6 @@ To clean generated build files:
 make clean
 ```
 
----
 
 ### 4.2 Load the Module
 
@@ -281,7 +271,6 @@ The proc entry should be available at:
 /proc/mp3/status
 ```
 
----
 
 ### 4.3 Create the Character Device Node
 
@@ -289,7 +278,6 @@ The proc entry should be available at:
 sudo mknod node c 423 0
 ```
 
----
 
 ### 4.4 Run Workloads
 
@@ -302,7 +290,6 @@ nice ./work 1024 R 10000 &
 
 The `work` program automatically registers itself with `/proc/mp3/status`, allocates memory, performs memory accesses, frees memory, and unregisters itself before exiting.
 
----
 
 ### 4.5 Collect Profiling Data
 
@@ -314,7 +301,6 @@ After the workload finishes, run:
 
 The monitor maps the kernel profiler buffer through the character device and prints collected profiling samples.
 
----
 
 ### 4.6 Unload the Module
 
@@ -322,7 +308,6 @@ The monitor maps the kernel profiler buffer through the character device and pri
 sudo rmmod mp3
 ```
 
----
 
 ## 5. Experimental Analysis
 
@@ -351,7 +336,6 @@ The workload with 50,000 accesses per iteration creates more memory pressure tha
 
 This experiment demonstrates that when memory access is random and the working set is large, the virtual memory system experiences frequent page faults.
 
----
 
 ### Experiment 2: Random Access vs. Locality-Based Access
 
@@ -374,7 +358,6 @@ In contrast, the random-access workload frequently jumps to unrelated locations 
 
 The difference between the two graphs shows that locality has a direct impact on virtual memory performance. Better locality reduces page fault pressure and usually improves completion time.
 
----
 
 ## 5.2 Case Study 2: Multiprogramming
 
@@ -416,7 +399,6 @@ The sharp increase at high `N` indicates that completion time becomes much longe
 
 This experiment shows that increasing multiprogramming improves utilization only up to a point. Once memory pressure becomes severe, additional processes can reduce overall efficiency because the system spends more time handling virtual memory overhead.
 
----
 
 ## 6. Design Decisions
 
@@ -424,7 +406,6 @@ This experiment shows that increasing multiprogramming improves utilization only
 
 The profiler buffer is relatively large, and it only needs to be virtually contiguous. It does not need to be physically contiguous. Therefore, `vmalloc()` is a better fit than `kmalloc()` because `kmalloc()` requires physically contiguous memory, which can be harder to allocate for larger buffers.
 
----
 
 ### 6.2 Why Use mmap?
 
@@ -432,7 +413,6 @@ A user-space profiler could repeatedly read data from the kernel through system 
 
 Using `mmap()` allows the monitor process to read the kernel profiler buffer directly through a shared mapping. This design greatly reduces profiling overhead and matches the goal of building a lightweight profiler.
 
----
 
 ### 6.3 Why Use a Delayed Workqueue?
 
@@ -440,7 +420,6 @@ The profiler needs to run periodically but should not block user processes. A de
 
 The work handler samples the registered processes every 50 ms and then re-arms itself using delayed work scheduling.
 
----
 
 ### 6.4 Why Use a Mutex?
 
@@ -456,7 +435,6 @@ The mutex protects list operations during:
 
 This ensures that process list operations are safe.
 
----
 
 ## 7. Results Summary
 
@@ -469,7 +447,6 @@ The experiments confirm several important virtual memory concepts:
 5. When the combined working set exceeds physical memory, completion time increases significantly.
 6. A kernel-space profiler with an `mmap()` shared buffer can collect high-frequency profiling data with low overhead.
 
----
 
 ## 8. Repository Structure
 
